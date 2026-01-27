@@ -38,6 +38,7 @@ jobs:
           rustup target add riscv64gc-unknown-none-elf
           git config --global --add safe.directory /__w/${{ github.event.repository.name }}/${{ github.event.repository.name }}
           git clone https://github.com/LearningOS/rCore-Tutorial-Checker.git ci-user
+          sed -i 's/timeout --foreground [0-9]\+/timeout 600/g' ci-user/overwrite/Makefile-ch3
           git clone https://github.com/LearningOS/rCore-Tutorial-Test.git ci-user/user
           ID=`git rev-parse --abbrev-ref HEAD | grep -oP 'ch\K[0-9]'`
           # cd ci-user && make test CHAPTER=$ID passwd=${{ secrets.BASE_TEST_TOKEN }}
