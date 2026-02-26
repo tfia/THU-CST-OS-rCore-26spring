@@ -15,6 +15,7 @@ mod switch;
 mod task;
 
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{MapPermission, VirtAddr};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
@@ -153,6 +154,57 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// Get syscall count tracker of current `Running` task for a given syscall id.
+    fn get_current_task_syscall_count(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].task_syscall_count[syscall_id]
+    }
+
+    /// Increase syscall count tracker of current `Running` task for a given syscall id by 1.
+    fn increase_current_task_syscall_count(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].task_syscall_count[syscall_id] += 1;
+    }
+
+    /// Map a memory region for current `Running` task.
+    pub fn mmap_current(&self, start: usize, len: usize, port: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let memory_set = &mut inner.tasks[current].memory_set;
+
+        let mut permission = MapPermission::U;
+        if port & 0x1 != 0 {
+            permission |= MapPermission::R;
+        }
+        if port & 0x2 != 0 {
+            permission |= MapPermission::W;
+        }
+        if port & 0x4 != 0 {
+            permission |= MapPermission::X;
+        }
+
+        if memory_set.mm_map(VirtAddr(start), len, permission) {
+            0
+        } else {
+            -1
+        }
+    }
+
+    /// Unmap a memory region for current `Running` task.
+    pub fn munmap_current(&self, start: usize, len: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let memory_set = &mut inner.tasks[current].memory_set;
+
+        if memory_set.mm_unmap(VirtAddr(start), len) {
+            0
+        } else {
+            -1
+        }
+    }
 }
 
 /// Run the first task in task list.
@@ -186,6 +238,26 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+/// Get syscall count tracker of current `Running` task for a given syscall id.
+pub fn get_current_task_syscall_count(syscall_id: usize) -> usize {
+    TASK_MANAGER.get_current_task_syscall_count(syscall_id)
+}
+
+/// Increase syscall count tracker of current `Running` task for a given syscall id by 1.
+pub fn increase_current_task_syscall_count(syscall_id: usize) {
+    TASK_MANAGER.increase_current_task_syscall_count(syscall_id);
+}
+
+/// Map a memory region for current `Running` task.
+pub fn mmap_current(start: usize, len: usize, port: usize) -> isize {
+    TASK_MANAGER.mmap_current(start, len, port)
+}
+
+/// Unmap a memory region for current `Running` task.
+pub fn munmap_current(start: usize, len: usize) -> isize {
+    TASK_MANAGER.munmap_current(start, len)
 }
 
 /// Get the current 'Running' task's token.

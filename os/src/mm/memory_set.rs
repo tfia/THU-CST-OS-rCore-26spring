@@ -51,6 +51,115 @@ impl MemorySet {
     pub fn token(&self) -> usize {
         self.page_table.token()
     }
+    /// Insert framed area with conflicts checking, return false if there is any conflict.
+    pub fn mm_map(
+        &mut self,
+        start_va: VirtAddr,
+        len: usize,
+        permission: MapPermission,
+    ) -> bool {
+        let end_va = VirtAddr::from(start_va.0 + len);
+        let start_vpn = start_va.floor();
+        let end_vpn = end_va.ceil();
+
+        for area in self.areas.iter() {
+            let area_start = area.vpn_range.get_start();
+            let area_end = area.vpn_range.get_end();
+            if start_vpn < area_end && end_vpn > area_start {
+                return false;
+            }
+        }
+        self.push(
+            MapArea::new(start_va, end_va, MapType::Framed, permission),
+            None,
+        );
+        true
+    }
+    /// Un-map an area, support split and partial unmap.
+    pub fn mm_unmap(
+        &mut self,
+        start_va: VirtAddr,
+        len: usize,
+    ) -> bool {
+        let end_va = VirtAddr::from(start_va.0 + len);
+        let start_vpn = start_va.floor();
+        let end_vpn = end_va.ceil();
+
+        // check if the area to be unmapped is fully mapped
+        let mut current_vpn = start_vpn;
+        while current_vpn < end_vpn {
+            let mut found = false;
+            for area in self.areas.iter_mut() {
+                if area.vpn_range.get_start() <= current_vpn && area.vpn_range.get_end() > current_vpn {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return false;
+            }
+            current_vpn.step();
+        }
+
+        // unmap the area
+        let mut new_areas = Vec::new();
+        for mut area in self.areas.drain(..) {
+            let area_start = area.vpn_range.get_start();
+            let area_end = area.vpn_range.get_end();
+
+            // Area not contains the unmapped area, just skip
+            if area_end <= start_vpn || area_start >= end_vpn {
+                new_areas.push(area);
+                continue;
+            }
+
+            // Area fully covers by the unmapped area, delete it
+            if start_vpn <= area_start && area_end <= end_vpn {
+                area.unmap(&mut self.page_table);
+                continue;
+            }
+
+            // Area fully contains the whole unmapped area, split it into two areas
+            if area_start < start_vpn && end_vpn < area_end {
+                // unmap the middle part
+                for vpn in VPNRange::new(start_vpn, end_vpn) {
+                    area.unmap_one(&mut self.page_table, vpn);
+                }
+                // split the right part (end_vpn, area_end)
+                let mut right_frames = BTreeMap::new();
+                for vpn in VPNRange::new(end_vpn, area_end) {
+                    if let Some(frame) = area.data_frames.remove(&vpn) {
+                        right_frames.insert(vpn, frame);
+                    }
+                }
+                let right_area = MapArea {
+                    vpn_range: VPNRange::new(end_vpn, area_end),
+                    data_frames: right_frames,
+                    map_type: area.map_type,
+                    map_perm: area.map_perm,
+                };
+                area.vpn_range = VPNRange::new(area_start, start_vpn);
+                new_areas.push(area);
+                new_areas.push(right_area);
+                continue;
+            }
+
+            // Area partially overlaps with the unmapped area, shrink it
+            if area_start < start_vpn && area_end <= end_vpn {
+                area.shrink_to(&mut self.page_table, start_vpn);
+                new_areas.push(area);
+                continue;
+            }
+            if start_vpn <= area_start && end_vpn < area_end {
+                area.shrink_to(&mut self.page_table, end_vpn);
+                new_areas.push(area);
+                continue;
+            }
+        }
+        
+        self.areas = new_areas;
+        true
+    }
     /// Assume that no conflicts.
     pub fn insert_framed_area(
         &mut self,
