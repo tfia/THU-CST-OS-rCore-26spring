@@ -3,11 +3,11 @@ use alloc::sync::Arc;
 
 use crate::{
     loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str},
+    mm::{translated_byte_buffer, translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next,
-    },
+    }, timer::get_time_us,
 };
 
 #[repr(C)]
@@ -105,12 +105,36 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
+    trace!("kernel: sys_get_time");
+    let us = get_time_us();
+    let sec = us / 1_000_000;
+    let usec = us % 1_000_000;
+
+    let buffers = translated_byte_buffer(
+        current_user_token(), 
+        ts as *const u8, 
+        core::mem::size_of::<TimeVal>(),
     );
-    -1
+
+    let mut kernel_bytes = [0u8; 16];
+    let sec_bytes = sec.to_ne_bytes();
+    let usec_bytes = usec.to_ne_bytes();
+    kernel_bytes[..8].copy_from_slice(&sec_bytes);
+    kernel_bytes[8..].copy_from_slice(&usec_bytes);
+
+    let mut kernel_iter = kernel_bytes.iter();
+    for buffer in buffers {
+        for byte in buffer {
+            if let Some(k_byte) = kernel_iter.next() {
+                *byte = *k_byte;
+            } else {
+                break;
+            }
+        }
+    }
+
+    0
 }
 
 /// YOUR JOB: Implement mmap.
