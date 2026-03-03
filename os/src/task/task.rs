@@ -3,7 +3,7 @@ use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::fs::{File, Stdin, Stdout};
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::mm::{KERNEL_SPACE, MapPermission, MemorySet, PhysPageNum, VirtAddr};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
@@ -259,6 +259,41 @@ impl TaskControlBlock {
             Some(old_break)
         } else {
             None
+        }
+    }
+
+    /// Map a memory region for current `Running` task.
+    pub fn mmap_current(&self, start: usize, len: usize, port: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let memory_set = &mut inner.memory_set;
+
+        let mut permission = MapPermission::U;
+        if port & 0x1 != 0 {
+            permission |= MapPermission::R;
+        }
+        if port & 0x2 != 0 {
+            permission |= MapPermission::W;
+        }
+        if port & 0x4 != 0 {
+            permission |= MapPermission::X;
+        }
+
+        if memory_set.mm_map(VirtAddr(start), len, permission) {
+            0
+        } else {
+            -1
+        }
+    }
+
+    /// Unmap a memory region for current `Running` task.
+    pub fn munmap_current(&self, start: usize, len: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let memory_set = &mut inner.memory_set;
+
+        if memory_set.mm_unmap(VirtAddr(start), len) {
+            0
+        } else {
+            -1
         }
     }
 }
