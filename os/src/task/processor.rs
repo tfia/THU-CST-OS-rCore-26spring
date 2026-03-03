@@ -109,3 +109,13 @@ pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }
 }
+
+/// Map a memory region for current `Running` task.
+pub fn mmap_current(start: usize, len: usize, port: usize) -> isize {
+    current_task().unwrap().mmap_current(start, len, port)
+}
+
+/// Unmap a memory region for current `Running` task.
+pub fn munmap_current(start: usize, len: usize) -> isize {
+    current_task().unwrap().munmap_current(start, len)
+}
