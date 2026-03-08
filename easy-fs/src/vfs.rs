@@ -14,6 +14,19 @@ pub struct Inode {
     block_device: Arc<dyn BlockDevice>,
 }
 
+/// The stat of a inode for vfs layer
+#[derive(Clone, Copy)]
+pub struct InodeStat {
+    /// ID of device containing file
+    pub dev: u64,
+    /// inode number
+    pub ino: u64,
+    /// file type and mode
+    pub mode: u32,
+    /// number of hard links
+    pub nlink: u32,
+}
+
 impl Inode {
     /// Create a vfs inode
     pub fn new(
@@ -182,5 +195,107 @@ impl Inode {
             }
         });
         block_cache_sync_all();
+    }
+    /// Get stat of current inode
+    pub fn stat_at(&self) -> InodeStat {
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| InodeStat {
+            dev: 0,
+            ino: self.block_id as u64,
+            mode: if disk_inode.is_dir() {
+                0o040000
+            } else {
+                0o100000
+            },
+            nlink: disk_inode.nlink,
+        })
+
+    }
+    /// Create a hard link to an existing inode
+    pub fn link_at(&self, old_path: &str, new_path: &str) -> isize {
+        // check if old_path exists
+        let old_inode = match self.find(old_path) {
+            Some(inode) => inode,
+            None => return -1,
+        };
+        let old_inode_id = self.read_disk_inode(|disk_inode| {
+            self.find_inode_id(
+                old_path,
+                disk_inode,
+            ).unwrap()
+        });
+        // check if new_path exists
+        if self.find(new_path).is_some() {
+            return -1;
+        }
+
+        // create a new dirent for new_path
+        self.modify_disk_inode(|root_inode| {
+            // append file in the dirent
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            // increase size
+            self.increase_size(new_size as u32, root_inode, &mut self.fs.lock());
+            // write dirent
+            let dirent = DirEntry::new(new_path, old_inode_id);
+            root_inode.write_at(
+                file_count * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+        });
+
+        // increase nlink of old inode
+        old_inode.modify_disk_inode(|old_disk_inode| {
+            old_disk_inode.nlink += 1;
+        });
+
+        block_cache_sync_all();
+        0
+    }
+    /// Remove a link to an existing inode, and deallocate the inode if it is the last link
+    pub fn unlink_at(&self, path: &str) -> isize {
+        // check if path exists
+        let inode = match self.find(path) {
+            Some(inode) => inode,
+            None => return -1,
+        };
+        let inode_id = self.read_disk_inode(|disk_inode| {
+            self.find_inode_id(
+                path,
+                disk_inode,
+            ).unwrap()
+        });
+        // remove dirent for path
+        self.modify_disk_inode(|root_inode| {
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let mut dirent = DirEntry::empty();
+            for i in 0..file_count {
+                root_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device);
+                if dirent.name() == path {
+                    // move the last dirent to the current position
+                    if i != file_count - 1 {
+                        let mut last = DirEntry::empty();
+                        root_inode.read_at((file_count - 1) * DIRENT_SZ, last.as_bytes_mut(), &self.block_device);
+                        root_inode.write_at(i * DIRENT_SZ, last.as_bytes(), &self.block_device);
+                    } else {
+                        // just clear the last dirent
+                        root_inode.write_at(i * DIRENT_SZ, &[0; DIRENT_SZ], &self.block_device);
+                    }
+                    root_inode.size -= DIRENT_SZ as u32;
+                    break;
+                }
+            }
+        });
+
+        // decrease nlink of inode, and deallocate it if nlink becomes 0
+        if inode.modify_disk_inode(|disk_inode| {
+            disk_inode.nlink -= 1;
+            disk_inode.nlink == 0
+        }) {
+            inode.clear();
+            self.fs.lock().dealloc_inode(inode_id);
+        }
+        0
     }
 }

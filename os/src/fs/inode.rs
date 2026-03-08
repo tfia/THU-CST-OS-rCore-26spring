@@ -5,7 +5,8 @@
 //! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
 //! need to wrap `OSInodeInner` into `UPSafeCell`
 use super::File;
-use crate::drivers::BLOCK_DEVICE;
+use crate::fs::StatMode;
+use crate::{drivers::BLOCK_DEVICE, fs::Stat};
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
 use alloc::sync::Arc;
@@ -125,6 +126,16 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
     }
 }
 
+/// Create a hard link to an existing inode
+pub fn linkat(old_path: &str, new_path: &str) -> isize {
+    ROOT_INODE.link_at(old_path, new_path)
+}
+
+/// Remove a link to an existing inode, and deallocate the inode if it is the last link
+pub fn unlinkat(path: &str) -> isize {
+    ROOT_INODE.unlink_at(path)
+}
+
 impl File for OSInode {
     fn readable(&self) -> bool {
         self.readable
@@ -155,5 +166,14 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+    fn stat(&self, st: &mut Stat) -> isize {
+        let inner = self.inner.exclusive_access();
+        let s = inner.inode.stat_at();
+        st.dev = s.dev;
+        st.ino = s.ino;
+        st.mode = StatMode::from_bits(s.mode).unwrap();
+        st.nlink = s.nlink;
+        0
     }
 }
