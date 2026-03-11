@@ -30,7 +30,7 @@ pub struct TaskControlBlock {
     pub program_brk: usize,
 
     /// The syscall count tracker for this task
-    pub task_syscall_count: [usize; 512],
+    pub task_syscall_count: [usize; 420],
 }
 
 impl TaskControlBlock {
