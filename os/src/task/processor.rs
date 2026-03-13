@@ -95,6 +95,12 @@ pub fn current_user_token() -> usize {
     task.get_user_token()
 }
 
+/// Get the current thread id
+pub fn current_tid() -> usize {
+    let task = current_task().unwrap();
+    task.get_tid()
+}
+
 /// Get the mutable reference to trap context of current task
 pub fn current_trap_cx() -> &'static mut TrapContext {
     current_task()

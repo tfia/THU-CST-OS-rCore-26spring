@@ -12,18 +12,22 @@ pub trait Mutex: Sync + Send {
     fn lock(&self);
     /// Unlock the mutex
     fn unlock(&self);
+    /// Get the resource id of the mutex
+    fn get_rid(&self) -> usize;
 }
 
 /// Spinlock Mutex struct
 pub struct MutexSpin {
     locked: UPSafeCell<bool>,
+    rid: usize,
 }
 
 impl MutexSpin {
     /// Create a new spinlock mutex
-    pub fn new() -> Self {
+    pub fn new(rid: usize) -> Self {
         Self {
             locked: unsafe { UPSafeCell::new(false) },
+            rid,
         }
     }
 }
@@ -50,11 +54,16 @@ impl Mutex for MutexSpin {
         let mut locked = self.locked.exclusive_access();
         *locked = false;
     }
+
+    fn get_rid(&self) -> usize {
+        self.rid
+    }
 }
 
 /// Blocking Mutex struct
 pub struct MutexBlocking {
     inner: UPSafeCell<MutexBlockingInner>,
+    rid: usize,
 }
 
 pub struct MutexBlockingInner {
@@ -64,7 +73,7 @@ pub struct MutexBlockingInner {
 
 impl MutexBlocking {
     /// Create a new blocking mutex
-    pub fn new() -> Self {
+    pub fn new(rid: usize) -> Self {
         trace!("kernel: MutexBlocking::new");
         Self {
             inner: unsafe {
@@ -73,6 +82,7 @@ impl MutexBlocking {
                     wait_queue: VecDeque::new(),
                 })
             },
+            rid,
         }
     }
 }
@@ -101,5 +111,9 @@ impl Mutex for MutexBlocking {
         } else {
             mutex_inner.locked = false;
         }
+    }
+
+    fn get_rid(&self) -> usize {
+        self.rid
     }
 }

@@ -8,6 +8,8 @@ use alloc::{collections::VecDeque, sync::Arc};
 pub struct Semaphore {
     /// semaphore inner
     pub inner: UPSafeCell<SemaphoreInner>,
+    /// resource id of the semaphore
+    pub rid: usize,
 }
 
 pub struct SemaphoreInner {
@@ -17,7 +19,7 @@ pub struct SemaphoreInner {
 
 impl Semaphore {
     /// Create a new semaphore
-    pub fn new(res_count: usize) -> Self {
+    pub fn new(res_count: usize, rid: usize) -> Self {
         trace!("kernel: Semaphore::new");
         Self {
             inner: unsafe {
@@ -26,6 +28,7 @@ impl Semaphore {
                     wait_queue: VecDeque::new(),
                 })
             },
+            rid,
         }
     }
 
@@ -51,5 +54,10 @@ impl Semaphore {
             drop(inner);
             block_current_and_run_next();
         }
+    }
+
+    /// Get the resource id of the semaphore
+    pub fn get_rid(&self) -> usize {
+        self.rid
     }
 }
