@@ -4,6 +4,8 @@
 
 我首先迁移了 `sys_get_time` `sys_mmap` `sys_munmap` 系统调用到新的进程框架下。原先在 `TaskManager` 中实现的 `mmap_current` 等方法需要迁移到 `TaskControlBlock` 中，并且修改为每个 `TaskControlBlock` 访问自己的 `MemorySet` 的形式。
 
+接着，我实现了 `sys_spawn` 系统调用。该系统调用直接创建一个新的 `TaskControlBlock`，新进程的 `MemorySet` 通过 `MemorySet::from_elf` 从 ELF 文件创建，并为其准备好 `TrapContext`。最后，将新进程加入 `TaskManager` 的就绪队列中。
+
 之后，我实现了 stride 调度算法。在 `TaskControlBlock` 中添加了 `priority` 和 `pass` 字段，在 `TaskManager` 中实现了 Stride 调度算法，替换原有的 FIFO 调度算法。其中，按照实验手册的建议，我使用暴力扫一遍的方式寻找 pass 最小的进程来调度。
 
 ## 简答题
